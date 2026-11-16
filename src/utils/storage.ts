@@ -28,13 +28,21 @@ const VALID_GOAL_KEYS = new Set<SectionGoalKey>([
 
 function normalizeDaysGoal(rawGoal: unknown): SyllabusDaysGoal {
   if (!rawGoal || typeof rawGoal !== 'object') {
-    return { overallDays: null, sectionDays: {} };
+    return { overallDays: null, overallStartDate: null, sectionDays: {} };
   }
   const obj = rawGoal as Record<string, unknown>;
   const overallDays =
     typeof obj.overallDays === 'number' && obj.overallDays >= 1
       ? Math.round(obj.overallDays)
       : null;
+
+  const overallStartDate =
+    overallDays === null
+      ? null
+      : typeof obj.overallStartDate === 'string' &&
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(obj.overallStartDate)
+      ? obj.overallStartDate
+      : getLocalDateKey();
 
   const sectionDays: Partial<Record<SectionGoalKey, number | null>> = {};
   if (obj.sectionDays && typeof obj.sectionDays === 'object') {
@@ -45,7 +53,30 @@ function normalizeDaysGoal(rawGoal: unknown): SyllabusDaysGoal {
       }
     }
   }
-  return { overallDays, sectionDays };
+  return { overallDays, overallStartDate, sectionDays };
+}
+
+export function calculateDaysRemaining(
+  overallDays: number | null,
+  overallStartDate?: string | null
+): number | null {
+  if (overallDays === null || overallDays <= 0) return null;
+  if (!overallStartDate || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(overallStartDate)) {
+    return overallDays;
+  }
+  const [sy, sm, sd] = overallStartDate.split('-').map(Number);
+  const startMidnight = new Date(sy, sm - 1, sd).getTime();
+  const now = new Date();
+  const todayMidnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
+  const elapsedDays = Math.max(
+    0,
+    Math.floor((todayMidnight - startMidnight) / 86400000)
+  );
+  return Math.max(0, overallDays - elapsedDays);
 }
 
 function migrateIpmatTracks(topics: Topic[], alreadyMigrated?: boolean): Topic[] {

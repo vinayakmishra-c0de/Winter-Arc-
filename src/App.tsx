@@ -262,13 +262,24 @@ export default function App() {
   }, [state.topics, activeExam, activeIpmatTrack]);
 
   // Manual Completion Days Goal Handlers
-  const handleOpenOverallDaysModal = (remainingTopics: number) => {
-    setDaysModalTarget({
-      scope: 'OVERALL',
-      label: 'All Syllabi Combined (Master Goal)',
-      remainingTopics,
-      currentDays: state.syllabusDaysGoal.overallDays,
-    });
+  const handleSetOverallDuration = (days: number | null) => {
+    const nextGoal = {
+      ...state.syllabusDaysGoal,
+      overallDays: days,
+      overallStartDate: days ? getLocalDateKey() : null,
+    };
+
+    setState((prev) => ({ ...prev, syllabusDaysGoal: nextGoal }));
+
+    if (user) {
+      void savePreferencesToCloud(user.uid, state.dailyTargetHours, nextGoal).catch(() =>
+        showToast('Cloud save failed for study goal duration', { tone: 'error' })
+      );
+    }
+
+    showToast(
+      days ? `Study Goal Duration set to ${days} days` : 'Cleared Study Goal Duration'
+    );
   };
 
   const handleOpenSectionDaysModal = (
@@ -290,7 +301,11 @@ export default function App() {
   ) => {
     const nextGoal =
       scope === 'OVERALL'
-        ? { ...state.syllabusDaysGoal, overallDays: days }
+        ? {
+            ...state.syllabusDaysGoal,
+            overallDays: days,
+            overallStartDate: days ? getLocalDateKey() : null,
+          }
         : {
             ...state.syllabusDaysGoal,
             sectionDays: { ...state.syllabusDaysGoal.sectionDays, [scope]: days },
@@ -812,7 +827,8 @@ export default function App() {
         <MasterGoalHeader
           topics={state.topics}
           overallTargetDays={state.syllabusDaysGoal.overallDays}
-          onOpenOverallDaysModal={handleOpenOverallDaysModal}
+          overallStartDate={state.syllabusDaysGoal.overallStartDate ?? null}
+          onSetOverallDuration={handleSetOverallDuration}
           activeWorkspace={activeWorkspace}
           onChangeWorkspace={setActiveWorkspace}
           activeExam={activeExam}

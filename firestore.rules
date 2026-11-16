@@ -66,6 +66,7 @@ service cloud.firestore {
           'ownerId',
           'dailyTargetHours',
           'overallDays',
+          'overallStartDate',
           'iitmDays',
           'ipmatIndoreDays',
           'ipmatRohtakDays',
@@ -77,6 +78,7 @@ service cloud.firestore {
           'ownerId',
           'dailyTargetHours',
           'overallDays',
+          'overallStartDate',
           'iitmDays',
           'ipmatIndoreDays',
           'ipmatRohtakDays',
@@ -87,6 +89,7 @@ service cloud.firestore {
         && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
         && data.dailyTargetHours is number && data.dailyTargetHours >= 2.5 && data.dailyTargetHours <= 6.5
         && isValidOptionalDays(data.overallDays)
+        && data.overallStartDate is string && (data.overallStartDate == '' || isValidDateString(data.overallStartDate))
         && isValidOptionalDays(data.iitmDays)
         && isValidOptionalDays(data.ipmatIndoreDays)
         && isValidOptionalDays(data.ipmatRohtakDays)
@@ -248,6 +251,7 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'dailyTargetHours',
           'overallDays',
+          'overallStartDate',
           'iitmDays',
           'ipmatIndoreDays',
           'ipmatRohtakDays',

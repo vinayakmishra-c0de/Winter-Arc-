@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -41,10 +42,19 @@ function buildPreferencesPayload(
   dailyTargetHours: number,
   daysGoal: SyllabusDaysGoal
 ) {
+  const overallDays = sanitizeOptionalDays(daysGoal.overallDays);
+  const overallStartDate =
+    overallDays > 0 &&
+    typeof daysGoal.overallStartDate === 'string' &&
+    /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(daysGoal.overallStartDate)
+      ? daysGoal.overallStartDate
+      : '';
+
   return {
     ownerId: uid,
     dailyTargetHours: Math.min(6.5, Math.max(2.5, Number(dailyTargetHours) || 3.0)),
-    overallDays: sanitizeOptionalDays(daysGoal.overallDays),
+    overallDays,
+    overallStartDate,
     iitmDays: sanitizeOptionalDays(daysGoal.sectionDays.IITM),
     ipmatIndoreDays: sanitizeOptionalDays(daysGoal.sectionDays.IPMAT_INDORE),
     ipmatRohtakDays: sanitizeOptionalDays(daysGoal.sectionDays.IPMAT_ROHTAK),
@@ -141,7 +151,7 @@ export async function bootstrapCloudSync(uid: string, localState: AppState): Pro
   try {
     const [prefSnap, topicsSnap] = await Promise.all([
       getDoc(doc(db, prefPath)),
-      getDocs(query(collection(db, topicsPath), limit(1))),
+      getDocs(query(collection(db, topicsPath), where('ownerId', '==', uid), limit(1))),
     ]);
 
     // If user already has cloud data, do not overwrite it with local defaults
@@ -207,7 +217,9 @@ export async function replaceCloudWorkspaceFromBackup(
   try {
     const subcollections = ['topics', 'focusLogs', 'mockTests', 'vaultNotes'];
     for (const sub of subcollections) {
-      const snap = await getDocs(collection(db, `${userBase}/${sub}`));
+      const snap = await getDocs(
+        query(collection(db, `${userBase}/${sub}`), where('ownerId', '==', uid))
+      );
       if (!snap.empty) {
         for (let i = 0; i < snap.docs.length; i += 400) {
           const batch = writeBatch(db);
@@ -245,8 +257,17 @@ export function subscribeToUserWorkspace(
     (snap) => {
       if (!snap.exists()) return;
       const d = snap.data();
+      const overallDays =
+        typeof d.overallDays === 'number' && d.overallDays > 0 ? d.overallDays : null;
+      const overallStartDate =
+        overallDays !== null &&
+        typeof d.overallStartDate === 'string' &&
+        /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d.overallStartDate)
+          ? d.overallStartDate
+          : null;
       const daysGoal: SyllabusDaysGoal = {
-        overallDays: typeof d.overallDays === 'number' && d.overallDays > 0 ? d.overallDays : null,
+        overallDays,
+        overallStartDate,
         sectionDays: {
           IITM: typeof d.iitmDays === 'number' && d.iitmDays > 0 ? d.iitmDays : null,
           IPMAT_INDORE:
@@ -275,7 +296,7 @@ export function subscribeToUserWorkspace(
   );
 
   const unsubTopics = onSnapshot(
-    collection(db, topicsPath),
+    query(collection(db, topicsPath), where('ownerId', '==', uid)),
     (snap) => {
       const list: Topic[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
@@ -305,7 +326,7 @@ export function subscribeToUserWorkspace(
   );
 
   const unsubFocus = onSnapshot(
-    collection(db, focusPath),
+    query(collection(db, focusPath), where('ownerId', '==', uid)),
     (snap) => {
       const list: FocusLog[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
@@ -327,7 +348,7 @@ export function subscribeToUserWorkspace(
   );
 
   const unsubMocks = onSnapshot(
-    collection(db, mocksPath),
+    query(collection(db, mocksPath), where('ownerId', '==', uid)),
     (snap) => {
       const list: MockTest[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
@@ -358,7 +379,7 @@ export function subscribeToUserWorkspace(
   );
 
   const unsubVault = onSnapshot(
-    collection(db, vaultPath),
+    query(collection(db, vaultPath), where('ownerId', '==', uid)),
     (snap) => {
       const list: VaultNote[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();

@@ -20,6 +20,11 @@
           "type": "number",
           "description": "Overall target days to complete syllabus (0 means unset)"
         },
+        "overallStartDate": {
+          "type": "string",
+          "description": "YYYY-MM-DD local date when study goal duration was set (empty string if unset)",
+          "maxLength": 10
+        },
         "iitmDays": {
           "type": "number",
           "description": "Target days for IITM Qualifier (0 means unset)"

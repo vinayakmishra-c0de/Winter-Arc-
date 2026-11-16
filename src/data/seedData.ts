@@ -517,6 +517,7 @@ export function getInitialState(): AppState {
     vaultNotes: SEED_VAULT_NOTES,
     syllabusDaysGoal: {
       overallDays: null,
+      overallStartDate: null,
       sectionDays: {},
     },
     ipmatTracksMigrated: true,

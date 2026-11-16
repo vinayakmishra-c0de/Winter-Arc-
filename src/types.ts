@@ -65,6 +65,7 @@ export interface VaultNote {
 
 export interface SyllabusDaysGoal {
   overallDays: number | null;
+  overallStartDate?: string | null;
   sectionDays: Partial<Record<SectionGoalKey, number | null>>;
 }
 

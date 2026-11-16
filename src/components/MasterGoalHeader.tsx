@@ -1,16 +1,15 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
-  CalendarClock,
+  Check,
   Cloud,
   Download,
   Flame,
   LineChart,
   LogOut,
   NotebookPen,
-  Pencil,
-  Plus,
   Upload,
+  X,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { EXAM_IDS, EXAM_META, ExamId, Topic } from '../types';
@@ -20,7 +19,8 @@ export type ActiveWorkspace = 'syllabus' | 'mocks';
 interface MasterGoalHeaderProps {
   topics: Topic[];
   overallTargetDays: number | null;
-  onOpenOverallDaysModal: (remainingTopics: number) => void;
+  overallStartDate: string | null;
+  onSetOverallDuration: (days: number | null) => void;
   activeWorkspace: ActiveWorkspace;
   onChangeWorkspace: (ws: ActiveWorkspace) => void;
   activeExam: ExamId;
@@ -36,7 +36,7 @@ interface MasterGoalHeaderProps {
 export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
   topics,
   overallTargetDays,
-  onOpenOverallDaysModal,
+  onSetOverallDuration,
   activeWorkspace,
   onChangeWorkspace,
   activeExam,
@@ -49,6 +49,13 @@ export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
   onSignOut,
 }) => {
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  const [durationInput, setDurationInput] = useState<string>(
+    overallTargetDays ? String(overallTargetDays) : ''
+  );
+
+  useEffect(() => {
+    setDurationInput(overallTargetDays ? String(overallTargetDays) : '');
+  }, [overallTargetDays]);
 
   // Overall progress counts unique topics so denominators stay exact
   const totalUnique = topics.length;
@@ -89,10 +96,26 @@ export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
     e.target.value = '';
   };
 
-  const dailyPaceHint =
-    overallTargetDays && remainingUnique > 0
-      ? `~${(remainingUnique / overallTargetDays).toFixed(1)}/day`
-      : null;
+  const parsedInput = parseInt(durationInput.trim(), 10);
+  const isValidInput =
+    durationInput.trim() !== '' &&
+    !Number.isNaN(parsedInput) &&
+    parsedInput >= 1 &&
+    parsedInput <= 1000;
+  const hasDurationChanged =
+    isValidInput && parsedInput !== overallTargetDays;
+
+  const handleDurationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!durationInput.trim()) {
+      if (overallTargetDays !== null) {
+        onSetOverallDuration(null);
+      }
+      return;
+    }
+    if (!isValidInput) return;
+    onSetOverallDuration(parsedInput);
+  };
 
   return (
     <header className="w-full space-y-5">
@@ -118,7 +141,7 @@ export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
           </div>
-          <span className="font-display font-bold text-lg sm:text-xl tracking-tight text-[#1E2420] whitespace-nowrap shrink-0">
+          <span className="font-[Georgia] font-bold text-lg sm:text-xl tracking-tight text-[#1E2420] whitespace-nowrap shrink-0">
             Winter Arc Command Center
           </span>
         </div>
@@ -221,19 +244,21 @@ export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
         className="neu-surface rounded-2xl p-5 sm:p-6 space-y-4"
       >
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-          {/* Left: Overall % + Completed / Remaining + Active Sprint + Target Days */}
+          {/* Left: Overall % + Days Remaining Counter + Active Sprint + Study Goal Duration Input */}
           <div className="flex flex-wrap items-center gap-4 sm:gap-5">
-            <div className="flex items-baseline gap-3">
-              <span className="font-mono tabular-nums text-3xl sm:text-4xl font-bold tracking-tight text-[#153226]">
-                {overallPercent}%
-              </span>
-              <div>
-                <h1 className="font-display font-bold text-sm sm:text-base text-[#1E2420]">
-                  Master Goal Proximity
-                </h1>
-                <p className="text-xs sm:text-sm text-[#5A625C] font-mono tabular-nums">
-                  {completedUnique} completed · {remainingUnique} remaining · {totalUnique} total
-                </p>
+            <div className="flex flex-wrap items-center gap-3.5">
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono tabular-nums text-3xl sm:text-4xl font-bold tracking-tight text-[#153226]">
+                  {overallPercent}%
+                </span>
+                <div>
+                  <h1 className="font-display font-bold text-sm sm:text-base text-[#1E2420]">
+                    Master Goal Proximity
+                  </h1>
+                  <p className="text-xs sm:text-sm text-[#5A625C] font-mono tabular-nums">
+                    {completedUnique} completed · {remainingUnique} remaining · {totalUnique} total
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -250,43 +275,59 @@ export const MasterGoalHeader: React.FC<MasterGoalHeaderProps> = ({
               </div>
             </div>
 
-            {/* Manual Syllabus Completion Days Target */}
-            <div className="neu-well-sm rounded-xl px-3.5 py-2 flex items-center gap-2.5">
-              <CalendarClock className="w-4 h-4 text-[#153226] shrink-0" />
-              <div className="text-xs">
-                <div className="text-[#5A625C] font-medium">Completion Timeline</div>
-                {overallTargetDays ? (
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono tabular-nums font-bold text-[#1E2420]">
-                      {overallTargetDays} Days
-                    </span>
-                    {dailyPaceHint && (
-                      <span className="font-mono tabular-nums text-[11px] text-[#5A625C]">
-                        ({dailyPaceHint})
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onOpenOverallDaysModal(remainingUnique)}
-                      className="neu-btn rounded-md px-2 py-0.5 text-[11px] font-semibold text-[#153226] inline-flex items-center gap-1 cursor-pointer"
-                      title="Manually re-edit syllabus completion days"
-                    >
-                      <Pencil className="w-2.5 h-2.5" />
-                      <span>Edit</span>
-                    </button>
-                  </div>
-                ) : (
+            {/* Study Goal Duration Inline Input */}
+            <form
+              onSubmit={handleDurationSubmit}
+              className="neu-well-sm rounded-xl px-3 py-1.5 flex items-center gap-2"
+            >
+              <label
+                htmlFor="study-goal-duration"
+                className="text-xs font-medium text-[#5A625C] whitespace-nowrap shrink-0"
+              >
+                Study Goal Duration
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="study-goal-duration"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  value={durationInput}
+                  onChange={(e) => setDurationInput(e.target.value)}
+                  placeholder="Days"
+                  aria-label="Study Goal Duration in days"
+                  className="neu-well w-16 rounded-lg px-2 py-1 text-xs font-mono tabular-nums font-bold text-[#1E2420] focus:outline-none focus:ring-2 focus:ring-[#9DE0C5]"
+                />
+                <span className="text-[11px] font-medium text-[#5A625C] whitespace-nowrap">
+                  days
+                </span>
+                <button
+                  type="submit"
+                  disabled={!isValidInput || (!hasDurationChanged && overallTargetDays !== null)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-all ${
+                    isValidInput && (hasDurationChanged || overallTargetDays === null)
+                      ? 'neu-mint cursor-pointer'
+                      : 'neu-btn text-[#7C847D] opacity-60 cursor-not-allowed'
+                  }`}
+                  title="Save Study Goal Duration"
+                >
+                  <Check className="w-3 h-3" />
+                  <span>{overallTargetDays ? 'Update' : 'Set'}</span>
+                </button>
+                {overallTargetDays !== null && (
                   <button
                     type="button"
-                    onClick={() => onOpenOverallDaysModal(remainingUnique)}
-                    className="neu-mint rounded-md px-2.5 py-0.5 text-[11px] font-bold inline-flex items-center gap-1 mt-0.5 cursor-pointer"
+                    onClick={() => onSetOverallDuration(null)}
+                    className="neu-btn rounded-lg p-1 text-[#5A625C] hover:text-[#B91C1C] cursor-pointer shrink-0"
+                    title="Clear Study Goal Duration"
+                    aria-label="Clear Study Goal Duration"
                   >
-                    <Plus className="w-3 h-3" />
-                    <span>Set Target Days</span>
+                    <X className="w-3 h-3" />
                   </button>
                 )}
               </div>
-            </div>
+            </form>
           </div>
 
           {/* Right: Section-Wise Completion Pills */}
