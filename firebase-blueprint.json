@@ -1,0 +1,304 @@
+{
+  "entities": {
+    "UserPreferences": {
+      "title": "UserPreferences",
+      "description": "User focus target hours and syllabus completion timeline targets.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Authenticated user UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dailyTargetHours": {
+          "type": "number",
+          "description": "Daily deep work target hours between 2.5 and 6.5"
+        },
+        "overallDays": {
+          "type": "number",
+          "description": "Overall target days to complete syllabus (0 means unset)"
+        },
+        "iitmDays": {
+          "type": "number",
+          "description": "Target days for IITM Qualifier (0 means unset)"
+        },
+        "ipmatIndoreDays": {
+          "type": "number",
+          "description": "Target days for IPMAT Indore (0 means unset)"
+        },
+        "ipmatRohtakDays": {
+          "type": "number",
+          "description": "Target days for IPMAT Rohtak (0 means unset)"
+        },
+        "jipmatDays": {
+          "type": "number",
+          "description": "Target days for JIPMAT (0 means unset)"
+        },
+        "cuetDays": {
+          "type": "number",
+          "description": "Target days for CUET UG (0 means unset)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": ["ownerId", "dailyTargetHours", "updatedAt"]
+    },
+    "SyllabusTopic": {
+      "title": "SyllabusTopic",
+      "description": "A single syllabus topic item belonging to an exam section with Drive resource links and synergy tags.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "exam": {
+          "type": "string",
+          "enum": ["IITM", "IPMAT", "CUET"]
+        },
+        "subExam": {
+          "type": "string",
+          "enum": ["INDORE", "ROHTAK", "JIPMAT", ""]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 260
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "inTarget": {
+          "type": "boolean"
+        },
+        "synergy": {
+          "type": "array",
+          "description": "Up to 3 cross-exam synergy tags"
+        },
+        "links": {
+          "type": "array",
+          "description": "Up to 20 attached Google Drive resource links"
+        },
+        "clientCreatedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "exam",
+        "subject",
+        "unit",
+        "name",
+        "completed",
+        "inTarget",
+        "synergy",
+        "links",
+        "clientCreatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FocusLog": {
+      "title": "FocusLog",
+      "description": "A logged deep-work or offline study focus session.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "exam": {
+          "type": "string",
+          "enum": ["IITM", "IPMAT", "CUET"]
+        },
+        "minutes": {
+          "type": "number"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["50/10", "25/5", "manual"]
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "date", "exam", "minutes", "mode", "timestamp", "createdAt"]
+    },
+    "MockTest": {
+      "title": "MockTest",
+      "description": "A logged mock test attempt with computed score and net accuracy.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "exam": {
+          "type": "string",
+          "enum": ["IITM", "IPMAT", "CUET"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "score": {
+          "type": "number"
+        },
+        "maxMarks": {
+          "type": "number"
+        },
+        "wrongQuestions": {
+          "type": "number"
+        },
+        "attemptedQuestions": {
+          "type": "number"
+        },
+        "scorePercent": {
+          "type": "number"
+        },
+        "netAccuracyPercent": {
+          "type": "number"
+        },
+        "clientCreatedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "exam",
+        "name",
+        "date",
+        "score",
+        "maxMarks",
+        "wrongQuestions",
+        "scorePercent",
+        "netAccuracyPercent",
+        "clientCreatedAt",
+        "createdAt"
+      ]
+    },
+    "VaultNote": {
+      "title": "VaultNote",
+      "description": "A formula or mistake takeaway note in the Sunday revision vault.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "tags": {
+          "type": "array",
+          "description": "1 to 3 exam tags"
+        },
+        "reviewed": {
+          "type": "boolean"
+        },
+        "clientCreatedAt": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "content",
+        "tags",
+        "reviewed",
+        "clientCreatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/UserPreferences" },
+      "description": "Per-user workspace preferences and syllabus completion day targets."
+    },
+    "/users/{userId}/topics/{topicId}": {
+      "schema": { "$ref": "#/entities/SyllabusTopic" },
+      "description": "Per-user syllabus topics across IITM, IPMAT Indore/Rohtak/JIPMAT, and CUET."
+    },
+    "/users/{userId}/focusLogs/{logId}": {
+      "schema": { "$ref": "#/entities/FocusLog" },
+      "description": "Per-user focus timer and offline study logs."
+    },
+    "/users/{userId}/mockTests/{mockId}": {
+      "schema": { "$ref": "#/entities/MockTest" },
+      "description": "Per-user mock test score and accuracy records."
+    },
+    "/users/{userId}/vaultNotes/{noteId}": {
+      "schema": { "$ref": "#/entities/VaultNote" },
+      "description": "Per-user mistake and formula vault revision notes."
+    }
+  }
+}

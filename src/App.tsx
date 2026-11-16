@@ -1,4 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  User,
+} from 'firebase/auth';
 import { RotateCcw, X } from 'lucide-react';
 import { AppState, ExamId, IpmatTrack, SectionGoalKey, Topic } from './types';
 import { createId, getLocalDateKey } from './data/seedData';
@@ -12,7 +18,25 @@ import {
   exportSectionToExcel,
   parseExcelTopics,
 } from './utils/excel';
+import { auth } from './firebase';
+import {
+  addFocusLogToCloud,
+  addMockTestToCloud,
+  addVaultNoteToCloud,
+  bootstrapCloudSync,
+  createManyTopicsInCloud,
+  createTopicInCloud,
+  deleteMockTestFromCloud,
+  deleteTopicFromCloud,
+  deleteVaultNoteFromCloud,
+  replaceCloudWorkspaceFromBackup,
+  savePreferencesToCloud,
+  subscribeToUserWorkspace,
+  updateTopicFieldsInCloud,
+  updateVaultNoteFieldsInCloud,
+} from './services/firestoreSync';
 import { ActiveWorkspace, MasterGoalHeader } from './components/MasterGoalHeader';
+import { LoginPage } from './components/LoginPage';
 import { SyllabusEngine } from './components/SyllabusEngine';
 import { FocusTimerWidget } from './components/FocusTimerWidget';
 import { MockAnalyticsView } from './components/MockAnalyticsView';
@@ -35,6 +59,14 @@ interface ToastState {
 
 export default function App() {
   const [state, setState] = useState<AppState>(() => loadAppState());
+  const stateRef = useRef<AppState>(state);
+  stateRef.current = state;
+
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+
   const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace>('syllabus');
   const [activeExam, setActiveExam] = useState<ExamId>('IITM');
   const [activeIpmatTrack, setActiveIpmatTrack] = useState<IpmatTrack>('INDORE');
@@ -55,6 +87,7 @@ export default function App() {
   // Toast state
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const prefSyncTimerRef = useRef<number | null>(null);
 
   const showToast = useCallback(
     (message: string, options?: { tone?: 'neutral' | 'error'; undoAction?: () => void }) => {
@@ -75,10 +108,108 @@ export default function App() {
     []
   );
 
-  // Persist every state update to localStorage
+  // Persist every state update to localStorage as offline cache
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  // Firebase Auth & Real-Time Firestore Listeners
+  useEffect(() => {
+    let unsubCloud: (() => void) | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, async (nextUser) => {
+      if (unsubCloud) {
+        unsubCloud();
+        unsubCloud = null;
+      }
+      setUser(nextUser);
+      setAuthLoading(false);
+
+      if (!nextUser) return;
+
+      try {
+        const seededNewCloud = await bootstrapCloudSync(nextUser.uid, stateRef.current);
+        if (seededNewCloud) {
+          showToast('Synced local workspace to Firebase Cloud');
+        }
+
+        unsubCloud = subscribeToUserWorkspace(nextUser.uid, {
+          onPreferences: (dailyTargetHours, syllabusDaysGoal) => {
+            setState((prev) => ({
+              ...prev,
+              dailyTargetHours,
+              syllabusDaysGoal,
+            }));
+          },
+          onTopics: (topics) => {
+            setState((prev) => ({ ...prev, topics }));
+          },
+          onFocusLogs: (focusLogs) => {
+            setState((prev) => ({ ...prev, focusLogs }));
+          },
+          onMockTests: (mockTests) => {
+            setState((prev) => ({ ...prev, mockTests }));
+          },
+          onVaultNotes: (vaultNotes) => {
+            setState((prev) => ({ ...prev, vaultNotes }));
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Cloud sync connection error';
+        console.error(msg);
+        showToast('Cloud sync failed — continuing with local cache', { tone: 'error' });
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubCloud) unsubCloud();
+    };
+  }, [showToast]);
+
+  const handleEmailPasswordLogin = async (email: string, password: string) => {
+    setLoginError('');
+    setLoginSubmitting(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      showToast('Signed in — Cloud Sync active');
+    } catch (err: unknown) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found'
+      ) {
+        setLoginError('Invalid email or password.');
+      } else if (code === 'auth/invalid-email') {
+        setLoginError('Please enter a valid email address.');
+      } else if (code === 'auth/user-disabled') {
+        setLoginError('This account has been disabled.');
+      } else if (code === 'auth/too-many-requests') {
+        setLoginError('Too many failed attempts. Please wait a moment and try again.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setLoginError(
+          'Email/Password sign-in is not enabled yet in Firebase Console.'
+        );
+      } else {
+        setLoginError('Unable to sign in. Please check your credentials.');
+      }
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setLoginError('');
+    } catch {
+      showToast('Failed to sign out', { tone: 'error' });
+    }
+  };
 
   // Global Escape handler for drawers/modals
   useEffect(() => {
@@ -157,28 +288,23 @@ export default function App() {
     scope: 'OVERALL' | SectionGoalKey,
     days: number | null
   ) => {
-    setState((prev) => {
-      if (scope === 'OVERALL') {
-        return {
-          ...prev,
-          syllabusDaysGoal: {
-            ...prev.syllabusDaysGoal,
-            overallDays: days,
-          },
-        };
-      }
-      return {
-        ...prev,
-        syllabusDaysGoal: {
-          ...prev.syllabusDaysGoal,
-          sectionDays: {
-            ...prev.syllabusDaysGoal.sectionDays,
-            [scope]: days,
-          },
-        },
-      };
-    });
+    const nextGoal =
+      scope === 'OVERALL'
+        ? { ...state.syllabusDaysGoal, overallDays: days }
+        : {
+            ...state.syllabusDaysGoal,
+            sectionDays: { ...state.syllabusDaysGoal.sectionDays, [scope]: days },
+          };
+
+    setState((prev) => ({ ...prev, syllabusDaysGoal: nextGoal }));
     setDaysModalTarget(null);
+
+    if (user) {
+      void savePreferencesToCloud(user.uid, state.dailyTargetHours, nextGoal).catch(() =>
+        showToast('Cloud save failed for timeline', { tone: 'error' })
+      );
+    }
+
     showToast(
       days ? `Saved ${days}-day completion target` : 'Cleared completion days target'
     );
@@ -186,21 +312,47 @@ export default function App() {
 
   // Syllabus Actions
   const handleToggleComplete = (topicId: string) => {
+    const target = state.topics.find((t) => t.id === topicId);
+    if (!target) return;
+    const nextCompleted = !target.completed;
+
     setState((prev) => ({
       ...prev,
       topics: prev.topics.map((t) =>
-        t.id === topicId ? { ...t, completed: !t.completed } : t
+        t.id === topicId ? { ...t, completed: nextCompleted } : t
       ),
     }));
+
+    if (user) {
+      void updateTopicFieldsInCloud(
+        user.uid,
+        topicId,
+        { completed: nextCompleted },
+        target.exam
+      ).catch(() => showToast('Failed to sync topic completion', { tone: 'error' }));
+    }
   };
 
   const handleToggleTarget = (topicId: string) => {
+    const target = state.topics.find((t) => t.id === topicId);
+    if (!target) return;
+    const nextInTarget = !target.inTarget;
+
     setState((prev) => ({
       ...prev,
       topics: prev.topics.map((t) =>
-        t.id === topicId ? { ...t, inTarget: !t.inTarget } : t
+        t.id === topicId ? { ...t, inTarget: nextInTarget } : t
       ),
     }));
+
+    if (user) {
+      void updateTopicFieldsInCloud(
+        user.uid,
+        topicId,
+        { inTarget: nextInTarget },
+        target.exam
+      ).catch(() => showToast('Failed to sync sprint target', { tone: 'error' }));
+    }
   };
 
   const handleSaveTopicModal = (data: {
@@ -234,9 +386,16 @@ export default function App() {
       if (data.exam === 'IPMAT' && data.subExam) {
         setActiveIpmatTrack(data.subExam);
       }
+
+      if (user) {
+        void createTopicInCloud(user.uid, newTopic).catch(() =>
+          showToast('Failed to sync new topic to cloud', { tone: 'error' })
+        );
+      }
       showToast(`Added "${data.name}"`);
     } else if (topicModalState.topic) {
       const editId = topicModalState.topic.id;
+      const nextSubExam = data.exam === 'IPMAT' ? data.subExam || 'INDORE' : undefined;
       setState((prev) => ({
         ...prev,
         topics: prev.topics.map((t) =>
@@ -244,7 +403,7 @@ export default function App() {
             ? {
                 ...t,
                 exam: data.exam,
-                subExam: data.exam === 'IPMAT' ? data.subExam || 'INDORE' : undefined,
+                subExam: nextSubExam,
                 subject: data.subject,
                 unit: data.unit,
                 name: data.name,
@@ -254,6 +413,23 @@ export default function App() {
             : t
         ),
       }));
+
+      if (user) {
+        void updateTopicFieldsInCloud(
+          user.uid,
+          editId,
+          {
+            exam: data.exam,
+            subExam: nextSubExam || '',
+            subject: data.subject,
+            unit: data.unit,
+            name: data.name,
+            inTarget: data.inTarget,
+            synergy: data.synergy,
+          },
+          data.exam
+        ).catch(() => showToast('Failed to sync topic edit', { tone: 'error' }));
+      }
       showToast(`Updated "${data.name}"`);
     }
     setTopicModalState({ isOpen: false, mode: 'add', topic: null });
@@ -269,6 +445,12 @@ export default function App() {
       topics: prev.topics.filter((t) => t.id !== topicId),
     }));
 
+    if (user) {
+      void deleteTopicFromCloud(user.uid, topicId).catch(() =>
+        showToast('Failed to delete topic in cloud', { tone: 'error' })
+      );
+    }
+
     showToast(`Deleted "${deletedTopic.name}"`, {
       undoAction: () => {
         setState((prev) => {
@@ -277,6 +459,11 @@ export default function App() {
           copy.splice(Math.min(deletedIndex, copy.length), 0, deletedTopic);
           return { ...prev, topics: copy };
         });
+        if (user) {
+          void createTopicInCloud(user.uid, deletedTopic).catch(() =>
+            showToast('Failed to restore topic in cloud', { tone: 'error' })
+          );
+        }
         setToast(null);
       },
     });
@@ -284,21 +471,26 @@ export default function App() {
 
   // Drive Links
   const handleAddDriveLink = (topicId: string, label: string, url: string) => {
+    const target = state.topics.find((t) => t.id === topicId);
+    if (!target) return;
+    const nextLinks = [...target.links, { id: createId('lnk'), label, url }].slice(0, 20);
+
     setState((prev) => ({
       ...prev,
       topics: prev.topics.map((t) =>
-        t.id === topicId
-          ? {
-              ...t,
-              links: [
-                ...t.links,
-                { id: createId('lnk'), label, url },
-              ],
-            }
-          : t
+        t.id === topicId ? { ...t, links: nextLinks } : t
       ),
     }));
     setDriveModalTopicId(null);
+
+    if (user) {
+      void updateTopicFieldsInCloud(
+        user.uid,
+        topicId,
+        { links: nextLinks },
+        target.exam
+      ).catch(() => showToast('Failed to sync Drive link', { tone: 'error' }));
+    }
     showToast(`Saved Drive link "${label}"`);
   };
 
@@ -312,19 +504,33 @@ export default function App() {
   };
 
   const handleDeleteDriveLink = (topicId: string, linkId: string) => {
+    const target = state.topics.find((t) => t.id === topicId);
+    if (!target) return;
+    const nextLinks = target.links.filter((l) => l.id !== linkId);
+
     setState((prev) => ({
       ...prev,
       topics: prev.topics.map((t) =>
-        t.id === topicId
-          ? { ...t, links: t.links.filter((l) => l.id !== linkId) }
-          : t
+        t.id === topicId ? { ...t, links: nextLinks } : t
       ),
     }));
+
+    if (user) {
+      void updateTopicFieldsInCloud(
+        user.uid,
+        topicId,
+        { links: nextLinks },
+        target.exam
+      ).catch(() => showToast('Failed to remove Drive link in cloud', { tone: 'error' }));
+    }
     showToast('Removed Drive link');
   };
 
   // Synergy
   const handleSaveSynergy = (topicId: string, synergy: ExamId[]) => {
+    const target = state.topics.find((t) => t.id === topicId);
+    if (!target) return;
+
     setState((prev) => ({
       ...prev,
       topics: prev.topics.map((t) =>
@@ -332,6 +538,15 @@ export default function App() {
       ),
     }));
     setSynergyModalTopicId(null);
+
+    if (user) {
+      void updateTopicFieldsInCloud(
+        user.uid,
+        topicId,
+        { synergy },
+        target.exam
+      ).catch(() => showToast('Failed to sync synergy tags', { tone: 'error' }));
+    }
     showToast('Updated cross-exam synergy tags');
   };
 
@@ -348,6 +563,13 @@ export default function App() {
         ...prev,
         topics: [...prev.topics, ...imported],
       }));
+
+      if (user && imported.length > 0) {
+        void createManyTopicsInCloud(user.uid, imported).catch(() =>
+          showToast('Failed to upload imported Excel topics to cloud', { tone: 'error' })
+        );
+      }
+
       const dupMsg =
         skippedDuplicates > 0 ? ` (${skippedDuplicates} duplicates skipped)` : '';
       const targetLabel =
@@ -376,23 +598,27 @@ export default function App() {
   const handleLogFocusMinutes = useCallback(
     (exam: ExamId, minutes: number, mode: '50/10' | '25/5' | 'manual') => {
       if (minutes <= 0) return;
+      const newLog = {
+        id: createId('foc'),
+        date: getLocalDateKey(),
+        exam,
+        minutes,
+        mode,
+        timestamp: Date.now(),
+      };
       setState((prev) => ({
         ...prev,
-        focusLogs: [
-          ...prev.focusLogs,
-          {
-            id: createId('foc'),
-            date: getLocalDateKey(),
-            exam,
-            minutes,
-            mode,
-            timestamp: Date.now(),
-          },
-        ],
+        focusLogs: [...prev.focusLogs, newLog],
       }));
+
+      if (user) {
+        void addFocusLogToCloud(user.uid, newLog).catch(() =>
+          showToast('Failed to sync focus log to cloud', { tone: 'error' })
+        );
+      }
       showToast(`Logged ${minutes}m focus session to ${exam}`);
     },
-    [showToast]
+    [showToast, user]
   );
 
   const handleChangeDailyTarget = (hours: number) => {
@@ -400,21 +626,36 @@ export default function App() {
       ...prev,
       dailyTargetHours: hours,
     }));
+
+    if (user) {
+      if (prefSyncTimerRef.current) {
+        window.clearTimeout(prefSyncTimerRef.current);
+      }
+      prefSyncTimerRef.current = window.setTimeout(() => {
+        void savePreferencesToCloud(user.uid, hours, stateRef.current.syllabusDaysGoal).catch(
+          () => showToast('Failed to sync daily target hours', { tone: 'error' })
+        );
+      }, 450);
+    }
   };
 
   // Mock Tests
   const handleAddMockTest = (mockData: Omit<AppState['mockTests'][number], 'id' | 'createdAt'>) => {
+    const newMock = {
+      ...mockData,
+      id: createId('mock'),
+      createdAt: Date.now(),
+    };
     setState((prev) => ({
       ...prev,
-      mockTests: [
-        ...prev.mockTests,
-        {
-          ...mockData,
-          id: createId('mock'),
-          createdAt: Date.now(),
-        },
-      ],
+      mockTests: [...prev.mockTests, newMock],
     }));
+
+    if (user) {
+      void addMockTestToCloud(user.uid, newMock).catch(() =>
+        showToast('Failed to sync mock test to cloud', { tone: 'error' })
+      );
+    }
     showToast(`Logged mock "${mockData.name}" (${mockData.scorePercent}%)`);
   };
 
@@ -423,35 +664,55 @@ export default function App() {
       ...prev,
       mockTests: prev.mockTests.filter((m) => m.id !== id),
     }));
+
+    if (user) {
+      void deleteMockTestFromCloud(user.uid, id).catch(() =>
+        showToast('Failed to delete mock in cloud', { tone: 'error' })
+      );
+    }
     showToast('Removed mock test entry');
   };
 
   // Mistake & Formula Vault
   const handleAddVaultNote = (title: string, content: string, tags: ExamId[]) => {
+    const newNote = {
+      id: createId('note'),
+      title,
+      content,
+      tags,
+      reviewed: false,
+      createdAt: Date.now(),
+    };
     setState((prev) => ({
       ...prev,
-      vaultNotes: [
-        {
-          id: createId('note'),
-          title,
-          content,
-          tags,
-          reviewed: false,
-          createdAt: Date.now(),
-        },
-        ...prev.vaultNotes,
-      ],
+      vaultNotes: [newNote, ...prev.vaultNotes],
     }));
+
+    if (user) {
+      void addVaultNoteToCloud(user.uid, newNote).catch(() =>
+        showToast('Failed to sync vault note to cloud', { tone: 'error' })
+      );
+    }
     showToast('Saved note to Formula Vault');
   };
 
   const handleToggleVaultReviewed = (id: string) => {
+    const target = state.vaultNotes.find((n) => n.id === id);
+    if (!target) return;
+    const nextReviewed = !target.reviewed;
+
     setState((prev) => ({
       ...prev,
       vaultNotes: prev.vaultNotes.map((n) =>
-        n.id === id ? { ...n, reviewed: !n.reviewed } : n
+        n.id === id ? { ...n, reviewed: nextReviewed } : n
       ),
     }));
+
+    if (user) {
+      void updateVaultNoteFieldsInCloud(user.uid, id, { reviewed: nextReviewed }).catch(() =>
+        showToast('Failed to sync review status', { tone: 'error' })
+      );
+    }
   };
 
   const handleDeleteVaultNote = (id: string) => {
@@ -459,6 +720,12 @@ export default function App() {
       ...prev,
       vaultNotes: prev.vaultNotes.filter((n) => n.id !== id),
     }));
+
+    if (user) {
+      void deleteVaultNoteFromCloud(user.uid, id).catch(() =>
+        showToast('Failed to delete note in cloud', { tone: 'error' })
+      );
+    }
     showToast('Deleted vault note');
   };
 
@@ -501,12 +768,43 @@ export default function App() {
     }
   };
 
-  const handleConfirmRestore = () => {
+  const handleConfirmRestore = async () => {
     if (!pendingBackup) return;
-    setState(pendingBackup);
+    const backup = pendingBackup;
+    setState(backup);
     setPendingBackup(null);
-    showToast(`Restored backup (${pendingBackup.topics.length} topics)`);
+
+    if (user) {
+      try {
+        await replaceCloudWorkspaceFromBackup(user.uid, backup);
+        showToast(`Restored & synced backup (${backup.topics.length} topics)`);
+      } catch {
+        showToast('Restored locally, but cloud sync failed', { tone: 'error' });
+      }
+    } else {
+      showToast(`Restored backup (${backup.topics.length} topics)`);
+    }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center p-4">
+        <div className="neu-surface rounded-2xl px-6 py-4 text-sm font-semibold text-[#5A625C]">
+          Loading Winter Arc Command Center...
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LoginPage
+        onLogin={handleEmailPasswordLogin}
+        errorMessage={loginError}
+        isSubmitting={loginSubmitting}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen w-full px-3 sm:px-6 lg:px-8 py-5 sm:py-7">
@@ -526,6 +824,8 @@ export default function App() {
           onOpenVault={() => setIsVaultOpen(true)}
           onExportJson={handleExportJson}
           onSelectRestoreFile={handleSelectRestoreFile}
+          user={user}
+          onSignOut={handleSignOut}
         />
 
         {/* Main 2-Column Command Grid */}

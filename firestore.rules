@@ -1,0 +1,345 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isVerifiedOwner(userId) {
+      return isOwner(userId)
+        && (
+          request.auth.token.email_verified == true
+          || request.auth.token.firebase.sign_in_provider == 'password'
+        );
+    }
+
+    function isValidExam(val) {
+      return val is string && val.size() >= 4 && val.size() <= 5 && val in ['IITM', 'IPMAT', 'CUET'];
+    }
+
+    function isValidSubExam(val) {
+      return val is string && val.size() <= 6 && val in ['', 'INDORE', 'ROHTAK', 'JIPMAT'];
+    }
+
+    function isValidDateString(val) {
+      return val is string && val.size() == 10 && val.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isValidOptionalDays(val) {
+      return val is number && val >= 0 && val <= 1000;
+    }
+
+    function isValidLinkItem(item) {
+      return item is map
+        && item.keys().hasAll(['id', 'label', 'url'])
+        && item.keys().hasOnly(['id', 'label', 'url'])
+        && item.id is string && item.id.size() >= 1 && item.id.size() <= 128
+        && item.label is string && item.label.size() >= 1 && item.label.size() <= 160
+        && item.url is string && item.url.size() >= 1 && item.url.size() <= 1024;
+    }
+
+    // Entity Validators (strictly without existing() or diff() so safe on create & update)
+    function isValidUserPreferences(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'dailyTargetHours',
+          'overallDays',
+          'iitmDays',
+          'ipmatIndoreDays',
+          'ipmatRohtakDays',
+          'jipmatDays',
+          'cuetDays',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'dailyTargetHours',
+          'overallDays',
+          'iitmDays',
+          'ipmatIndoreDays',
+          'ipmatRohtakDays',
+          'jipmatDays',
+          'cuetDays',
+          'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
+        && data.dailyTargetHours is number && data.dailyTargetHours >= 2.5 && data.dailyTargetHours <= 6.5
+        && isValidOptionalDays(data.overallDays)
+        && isValidOptionalDays(data.iitmDays)
+        && isValidOptionalDays(data.ipmatIndoreDays)
+        && isValidOptionalDays(data.ipmatRohtakDays)
+        && isValidOptionalDays(data.jipmatDays)
+        && isValidOptionalDays(data.cuetDays)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSyllabusTopic(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'exam',
+          'subExam',
+          'subject',
+          'unit',
+          'name',
+          'completed',
+          'inTarget',
+          'synergy',
+          'links',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'exam',
+          'subExam',
+          'subject',
+          'unit',
+          'name',
+          'completed',
+          'inTarget',
+          'synergy',
+          'links',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
+        && isValidExam(data.exam)
+        && isValidSubExam(data.subExam)
+        && data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 120
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 160
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 260
+        && data.completed is bool
+        && data.inTarget is bool
+        && data.synergy is list && data.synergy.size() <= 3 && data.synergy.hasOnly(['IITM', 'IPMAT', 'CUET'])
+        && data.links is list && data.links.size() <= 20
+        && (data.links.size() == 0 || isValidLinkItem(data.links[0]))
+        && data.clientCreatedAt is number && data.clientCreatedAt >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFocusLog(data) {
+      return data.keys().hasAll(['ownerId', 'date', 'exam', 'minutes', 'mode', 'timestamp', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'date', 'exam', 'minutes', 'mode', 'timestamp', 'createdAt'])
+        && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
+        && isValidDateString(data.date)
+        && isValidExam(data.exam)
+        && data.minutes is number && data.minutes >= 1 && data.minutes <= 600
+        && data.mode is string && data.mode.size() >= 4 && data.mode.size() <= 6 && data.mode in ['50/10', '25/5', 'manual']
+        && data.timestamp is number && data.timestamp >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidMockTest(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'exam',
+          'name',
+          'date',
+          'score',
+          'maxMarks',
+          'wrongQuestions',
+          'attemptedQuestions',
+          'scorePercent',
+          'netAccuracyPercent',
+          'clientCreatedAt',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'exam',
+          'name',
+          'date',
+          'score',
+          'maxMarks',
+          'wrongQuestions',
+          'attemptedQuestions',
+          'scorePercent',
+          'netAccuracyPercent',
+          'clientCreatedAt',
+          'createdAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
+        && isValidExam(data.exam)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && isValidDateString(data.date)
+        && data.score is number && data.score >= -1000 && data.score <= 10000
+        && data.maxMarks is number && data.maxMarks >= 1 && data.maxMarks <= 10000
+        && data.wrongQuestions is number && data.wrongQuestions >= 0 && data.wrongQuestions <= 1000
+        && data.attemptedQuestions is number && data.attemptedQuestions >= 0 && data.attemptedQuestions <= 1000
+        && data.scorePercent is number && data.scorePercent >= 0 && data.scorePercent <= 100
+        && data.netAccuracyPercent is number && data.netAccuracyPercent >= 0 && data.netAccuracyPercent <= 100
+        && data.clientCreatedAt is number && data.clientCreatedAt >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidVaultNote(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'title',
+          'content',
+          'tags',
+          'reviewed',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'title',
+          'content',
+          'tags',
+          'reviewed',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 4000
+        && data.tags is list && data.tags.size() >= 1 && data.tags.size() <= 3 && data.tags.hasOnly(['IITM', 'IPMAT', 'CUET'])
+        && data.reviewed is bool
+        && data.clientCreatedAt is number && data.clientCreatedAt >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Per-User Collections
+    match /users/{userId}/settings/{settingId} {
+      allow get: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(settingId)
+        && settingId == 'preferences'
+        && isValidUserPreferences(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(settingId)
+        && settingId == 'preferences'
+        && isValidUserPreferences(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'dailyTargetHours',
+          'overallDays',
+          'iitmDays',
+          'ipmatIndoreDays',
+          'ipmatRohtakDays',
+          'jipmatDays',
+          'cuetDays',
+          'updatedAt'
+        ]);
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(settingId);
+    }
+
+    match /users/{userId}/topics/{topicId} {
+      allow get: if isValidId(userId) && isValidId(topicId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(topicId)
+        && isValidSyllabusTopic(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(topicId)
+        && isValidSyllabusTopic(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().clientCreatedAt == existing().clientCreatedAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['inTarget', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['synergy', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['links', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'exam',
+            'subExam',
+            'subject',
+            'unit',
+            'name',
+            'inTarget',
+            'synergy',
+            'updatedAt'
+          ])
+        );
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(topicId);
+    }
+
+    match /users/{userId}/focusLogs/{logId} {
+      allow get: if isValidId(userId) && isValidId(logId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(logId)
+        && isValidFocusLog(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(logId);
+    }
+
+    match /users/{userId}/mockTests/{mockId} {
+      allow get: if isValidId(userId) && isValidId(mockId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(mockId)
+        && isValidMockTest(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(mockId);
+    }
+
+    match /users/{userId}/vaultNotes/{noteId} {
+      allow get: if isValidId(userId) && isValidId(noteId) && isOwner(userId);
+      allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(noteId)
+        && isValidVaultNote(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedOwner(userId)
+        && isValidId(userId)
+        && isValidId(noteId)
+        && isValidVaultNote(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().clientCreatedAt == existing().clientCreatedAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['reviewed', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'tags', 'updatedAt'])
+        );
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(noteId);
+    }
+  }
+}
